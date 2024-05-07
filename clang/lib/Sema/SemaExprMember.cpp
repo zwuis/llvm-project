@@ -324,6 +324,11 @@ ExprResult Sema::BuildPossibleImplicitMemberExpr(
     if (TemplateArgs || TemplateKWLoc.isValid())
       return BuildTemplateIdExpr(SS, TemplateKWLoc, R, /*RequiresADL=*/false,
                                  TemplateArgs);
+    [[fallthrough]];
+  // To provide more clear diagnostics,
+  // build member expression as if in unevaluated context,
+  // then diagnose where the expression is used.
+  case IMA_Error_StaticOrExplicitContext:
     return BuildDeclarationNameExpr(SS, R, /*NeedsADL=*/false,
                                     /*AcceptInvalidDecl=*/false);
   case IMA_Dependent:
@@ -333,11 +338,20 @@ ExprResult Sema::BuildPossibleImplicitMemberExpr(
         TemplateKWLoc, R.getLookupNameInfo(), /*RequiresADL=*/false,
         TemplateArgs, R.begin(), R.end(), /*KnownDependent=*/true);
 
-  case IMA_Error_StaticOrExplicitContext:
-  case IMA_Error_Unrelated:
-    diagnoseInstanceReference(*this, SS, R.getRepresentativeDecl(),
-                              R.getLookupNameInfo());
+  case IMA_Error_Unrelated: {
+    NamedDecl *Rep = R.getRepresentativeDecl();
+    bool IsField = isa<FieldDecl>(Rep) || isa<IndirectFieldDecl>(Rep);
+    const DeclarationNameInfo &nameInfo = R.getLookupNameInfo();
+    SourceLocation Loc = nameInfo.getLoc();
+    // Unqualified lookup in a non-static member function found a member of an
+    // enclosing class.
+    SemaRef.Diag(Loc, diag::err_nested_non_static_member_use)
+        << IsField << cast<CXXRecordDecl>(Rep->getDeclContext())
+        << nameInfo.getName()
+        << cast<CXXMethodDecl>(getFunctionLevelDeclContext())->getParent()
+        << Loc;
     return ExprError();
+  }
   }
 
   llvm_unreachable("unexpected instance member access kind");
@@ -654,9 +668,6 @@ bool Sema::CheckQualifiedMemberReference(Expr *BaseExpr,
       return false;
   }
 
-  DiagnoseQualifiedMemberReference(*this, BaseExpr, BaseType, SS,
-                                   R.getRepresentativeDecl(),
-                                   R.getLookupNameInfo());
   return true;
 }
 
@@ -1087,8 +1098,19 @@ Sema::BuildMemberReferenceExpr(Expr *BaseExpr, QualType BaseExprType,
        (isa<CXXThisExpr>(BaseExpr) &&
         cast<CXXThisExpr>(BaseExpr)->isImplicit())) &&
       !SuppressQualifierCheck &&
-      CheckQualifiedMemberReference(BaseExpr, BaseType, SS, R))
+      CheckQualifiedMemberReference(BaseExpr, BaseType, SS, R)) {
+    if (!BaseExpr)
+      // To provide more clear diagnostics,
+      // build member expression as if in unevaluated context,
+      // then diagnose where the expression is used.
+      return BuildDeclarationNameExpr(SS, R, /*NeedsADL=*/false,
+                                      /*AcceptInvalidDecl=*/false);
+
+    Diag(R.getLookupNameInfo().getLoc(),
+         diag::err_qualified_member_of_unrelated)
+        << SS.getRange() << R.getRepresentativeDecl() << BaseType;
     return ExprError();
+  }
 
   // Construct an unresolved result if we in fact got an unresolved
   // result.
