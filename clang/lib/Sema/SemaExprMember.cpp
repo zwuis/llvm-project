@@ -325,8 +325,7 @@ ExprResult Sema::BuildPossibleImplicitMemberExpr(
       return BuildTemplateIdExpr(SS, TemplateKWLoc, R, /*RequiresADL=*/false,
                                  TemplateArgs);
     [[fallthrough]];
-  // To provide more clear diagnostics,
-  // build member expression as if in unevaluated context,
+  // To provide more clear diagnostics, build member expression,
   // then diagnose where the expression is used.
   case IMA_Error_StaticOrExplicitContext:
     return BuildDeclarationNameExpr(SS, R, /*NeedsADL=*/false,
@@ -1100,8 +1099,7 @@ Sema::BuildMemberReferenceExpr(Expr *BaseExpr, QualType BaseExprType,
       !SuppressQualifierCheck &&
       CheckQualifiedMemberReference(BaseExpr, BaseType, SS, R)) {
     if (!BaseExpr)
-      // To provide more clear diagnostics,
-      // build member expression as if in unevaluated context,
+      // To provide more clear diagnostics, build member expression,
       // then diagnose where the expression is used.
       return BuildDeclarationNameExpr(SS, R, /*NeedsADL=*/false,
                                       /*AcceptInvalidDecl=*/false);
